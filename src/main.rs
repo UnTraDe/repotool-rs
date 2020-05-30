@@ -1,7 +1,8 @@
 use std::env;
-use std::fs::OpenOptions;
-use std::fs::File;
+use std::fs::*;
+use std::path::{PathBuf, Path};
 use std::io::prelude::*;
+
 
 fn get_github_url(t: &str, name: &str) -> String {
 	format!("https://api.github.com/{}/{}/repos?per_page=200", t, name)
@@ -235,6 +236,78 @@ fn download_and_save_from_gitlab(group_name: &str, output_filename: &str, compar
 	write_urls(&urls, output_filename, compare_list, prepand_command);
 }
 
+fn find_git_dir(path: &Path) -> Option<PathBuf> {
+	for d in read_dir(path).unwrap() {
+		let entry = d.unwrap();
+
+		if entry.file_type().unwrap().is_dir() && entry.file_name() == ".git" {
+			return Some(entry.path());
+		}
+	}
+
+	None
+}
+
+fn find_config(path: &Path) -> Option<PathBuf> {
+	for d in read_dir(path).unwrap() {
+		let entry = d.unwrap();
+
+		if entry.file_type().unwrap().is_file() && entry.file_name() == "config" {
+			return Some(entry.path());
+		}
+	}
+
+	None
+}
+
+fn get_url(path: &Path) -> Option<String> {
+	let mut file = File::open(path).unwrap();
+	let mut contents = String::new();
+	file.read_to_string(&mut contents).unwrap();
+	contents = contents.replace("\r", "");
+	
+	for line in contents.split("\n") {
+		let clean = line.replace(" ", "").replace("\t", "").replace("\n", "");
+		let pair: Vec<&str> = clean.split('=').collect();
+		
+		if pair.len() == 2 && pair[0] == "url" {
+			return Some(pair[1].to_owned());
+		}
+	}
+
+	None
+}
+
+fn scan_repos(reposdir: &Path, level: usize, mut urls: &mut Vec<String>) {
+	for d in read_dir(reposdir).unwrap() {
+		let entry = d.unwrap();
+
+		if !entry.file_type().unwrap().is_dir() {
+			continue;
+		}
+
+		let git_dir;
+
+		if let Some(dir) = find_git_dir(entry.path().as_path()) {
+			git_dir = dir;
+		} else {
+			git_dir = entry.path();
+		}
+		
+		if let Some(cfg) = find_config(git_dir.as_path()) {
+			if let Some(url) = get_url(cfg.as_path()) {
+				urls.push(url);
+			}
+		} else if level < 1 {
+			scan_repos(git_dir.as_path(), level + 1, &mut urls);
+		}
+	}
+
+	if level == 0 {
+		write_urls(&urls, String::new().as_str(), Vec::new(), "");
+	}
+}
+
 enum Action {
 	None,
 	DownloadGithub,
@@ -319,7 +392,8 @@ fn main() {
 			download_and_save_from_gitlab(&gitlab_group, output_filename.as_str(), &compare_file, prepand_command.as_str());
 		}
 		Action::ScanReposDir => {
-			unimplemented!();
+			let mut urls = Vec::new();
+			scan_repos(Path::new(reposdir.as_str()), 0, &mut urls);
 		}
 	}
 }
