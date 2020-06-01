@@ -1,6 +1,7 @@
 use std::path::{PathBuf, Path};
 use std::fs::*;
 use std::io::prelude::*;
+use crate::common;
 
 fn find_git_dir(path: &Path) -> Option<PathBuf> {
 	for d in read_dir(path).unwrap() {
@@ -30,18 +31,14 @@ fn get_url(path: &Path) -> Option<String> {
 	let mut file = File::open(path).unwrap();
 	let mut contents = String::new();
 	file.read_to_string(&mut contents).unwrap();
-	contents = contents.replace("\r", "");
+	let urls = common::get_urls_from_git(contents);
+	assert!(urls.len() < 2);
 	
-	for line in contents.split("\n") {
-		let clean = line.replace(" ", "").replace("\t", "").replace("\n", "");
-		let pair: Vec<&str> = clean.split('=').collect();
-		
-		if pair.len() == 2 && pair[0] == "url" {
-			return Some(pair[1].to_owned());
-		}
+	if let Some(url) = urls.get(1) {
+		Some(url.clone())
+	} else {
+		None
 	}
-
-	None
 }
 
 pub fn scan_repos(reposdir: &Path, level: usize) -> Vec<String> {

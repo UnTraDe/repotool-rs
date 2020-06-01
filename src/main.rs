@@ -72,6 +72,7 @@ fn main() {
 	let mut cmd = Action::None;
 	let mut gitlab_group = String::new();
 	let mut crates_file = String::new();
+	let mut get_submodules = false;
 
 	for (i, arg) in args.iter().enumerate() {
 		match arg.as_str() {
@@ -124,6 +125,9 @@ fn main() {
 			"-c" => {
 				compare_file = args.get(i + 1).unwrap().clone();
 			}
+			"--get-submodules" => {
+				get_submodules = true;
+			}
 			_ => {}
 		}
 	}
@@ -133,7 +137,7 @@ fn main() {
 			println!("nothing to be done, TODO: print help");
 		}
 		Action::DownloadGithub => {
-			let urls = github::get_urls(&project, &project_type, filter_forks, only_forks);
+			let urls = github::get_urls(&project, &project_type, filter_forks, only_forks, get_submodules);
 			write_urls(&urls, &output_filename, &compare_file, &prepand_command);
 		}
 		Action::DownloadGitlab => {
@@ -150,4 +154,3 @@ fn main() {
 		}
 	}
 }
-

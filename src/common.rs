@@ -1,4 +1,20 @@
-pub fn request_get(url: &str)  -> (String, String) {
+pub fn get_urls_from_git(mut contents: String) -> Vec<String> {
+	let mut urls = Vec::new();
+	contents = contents.replace("\r", "");
+	
+	for line in contents.split("\n") {
+		let clean = line.replace(" ", "").replace("\t", "").replace("\n", "");
+		let pair: Vec<&str> = clean.split('=').collect();
+		
+		if pair.len() == 2 && pair[0] == "url" {
+			urls.push(pair[1].to_owned());
+		}
+	}
+
+	urls
+}
+
+pub fn request_get(url: &str)  -> Result<(String, String), reqwest::StatusCode> {
 	let client = reqwest::blocking::Client::new();
 
 	let resp = client.get(url)
@@ -11,7 +27,8 @@ pub fn request_get(url: &str)  -> (String, String) {
 	
 
 	if resp.status() != reqwest::StatusCode::OK {
-		panic!("failed to get response code 200 from: {}, instead got: {:?}", url, resp.status());
+		//panic!("failed to get response code 200 from: {}, instead got: {:?}", url, resp.status());
+		return Err(resp.status());
 	}
 
 	let mut next_url = String::new();
@@ -31,5 +48,5 @@ pub fn request_get(url: &str)  -> (String, String) {
 		}
 	}
 
-	(resp.text().unwrap(), next_url)
+	Ok((resp.text().unwrap(), next_url))
 }

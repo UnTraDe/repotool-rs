@@ -1,7 +1,7 @@
 use crate::common;
 
 fn get_subgroups(group_url: &str) -> Vec<u64> {
-	let (resp, next_url) = common::request_get(group_url);
+	let (resp, next_url) = common::request_get(group_url).unwrap();
 	assert!(next_url.is_empty()); // currently not handling next page
 
 	let repos: serde_json::Value = serde_json::from_str(&resp).unwrap();
