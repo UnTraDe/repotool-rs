@@ -1,89 +1,29 @@
 use std::env;
 use std::fs::*;
-use std::path::{PathBuf, Path};
+use std::path::Path;
 use std::io::prelude::*;
 
+mod common;
+mod scanner;
+mod github;
+mod gitlab;
+mod crates;
 
-fn get_github_url(t: &str, name: &str) -> String {
-	format!("https://api.github.com/{}/{}/repos?per_page=200", t, name)
-}
+fn write_urls(urls: &Vec<String>, mut output_filename: &str, compare_file: &str, prepand_command: &str) {
+	let mut compare_list = Vec::new();
 
-fn github_to_list(url: &str, verbose: bool, filter_forks: bool, only_forks: bool) -> Vec<String> {
-	assert!(!(filter_forks && only_forks));
+	if !compare_file.is_empty() {
+		let mut file = File::open(compare_file).unwrap();
+		let mut contents = String::new();
+		file.read_to_string(&mut contents).unwrap();
 
-	if verbose {
-		println!("GET {}", url)
-	}
-
-	let client = reqwest::blocking::Client::new();
-
-	let resp = client.get(url)
-		.header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:75.0) Gecko/20100101 Firefox/75.0")
-		.header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
-		.header("Accept-Language", "en-US,en;q=0.5")
-		//.header("Accept-Encoding", "gzip, deflate, br")
-		.send()
-		.unwrap();
-	
-
-	if resp.status() != reqwest::StatusCode::OK {
-		panic!("failed to get response code 200 from: {}, instead got: {:?}", url, resp.status());
-	}
-
-	let mut next_url = String::new();
-
-	if let Some(next_link) = resp.headers().get("link") {
-		for link in next_link.to_str().unwrap().split(',') {
-			let entries: Vec<&str> = link.split(";").collect();
-
-			if entries[1].split('=').collect::<Vec<&str>>()[1].replace('"', "") == "next" {
-				next_url = entries[0]
-					.replace("<", "")
-					.replace(">", "");
-
-				println!("found next page url: {}", next_url);
-				break;
-			}
-		}
-	}
-
-	let repos: serde_json::Value = serde_json::from_str(&resp.text().unwrap()).unwrap();
-	let repos_array = repos.as_array().expect("result is not array");
-	let mut urls = Vec::new();
-
-	for repo in repos_array {
-		if let Some(repo) = repo.as_object() {
-			let is_fork = repo.get("fork").expect("object does not have 'fork' attribute")
-			.as_bool().expect("'fork' should be bool");
+		contents = contents.replace("\r", "");
 		
-			if filter_forks && is_fork {
-				continue;
-			}
-
-			if only_forks && !is_fork {
-				continue;
-			}
-
-			urls.push(String::from(repo.get("clone_url").expect("should have 'clone_url' attribute")
-				.as_str().expect("clone_url should be a string")));
-		} else {
-			panic!("repo should be an object");
+		for line in contents.split("\n") {
+			compare_list.push(line.trim().to_string());
 		}
 	}
 
-	if verbose {
-		println!("found {0} repositories", urls.len());
-	}
-
-	if !next_url.is_empty() {
-		let mut next_urls = github_to_list(&next_url, verbose, filter_forks, only_forks);
-		urls.append(&mut next_urls);
-	}
-
-	urls
-}
-
-fn write_urls(urls: &Vec<String>, mut output_filename: &str, compare_list: Vec<String>, prepand_command: &str) {
 	if output_filename.is_empty() {
 		output_filename = "output.txt";
 	}
@@ -110,284 +50,6 @@ fn write_urls(urls: &Vec<String>, mut output_filename: &str, compare_list: Vec<S
     println!("written {} repositories to {} (skipped {})", temp, output_filename, (urls.len() - temp))
 }
 
-fn download_and_save_from_github(url: &str, output_filename: &str, verbose: bool, filter_forks: bool, only_forks: bool, compare_file: &str, prepand_command: &str) {
-	let urls = github_to_list(url, verbose, filter_forks, only_forks);
-	let mut compare_list = Vec::new();
-
-	if !compare_file.is_empty() {
-		let mut file = File::open(compare_file).unwrap();
-		let mut contents = String::new();
-		file.read_to_string(&mut contents).unwrap();
-
-		contents = contents.replace("\r", "");
-		
-		for line in contents.split("\n") {
-			compare_list.push(line.trim().to_string());
-		}
-	}
-
-	write_urls(&urls, output_filename, compare_list, prepand_command);
-}
-
-fn gitlab_get_subgroups(group_url: &str) -> Vec<u64> {
-	let client = reqwest::blocking::Client::new();
-
-	let resp = client.get(group_url)
-		.header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:75.0) Gecko/20100101 Firefox/75.0")
-		.header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
-		.header("Accept-Language", "en-US,en;q=0.5")
-		//.header("Accept-Encoding", "gzip, deflate, br")
-		.send()
-		.unwrap();
-	
-
-	if resp.status() != reqwest::StatusCode::OK {
-		panic!("failed to get response code 200 from: {}, instead got: {:?}", group_url, resp.status());
-	}
-
-	let repos: serde_json::Value = serde_json::from_str(&resp.text().unwrap()).unwrap();
-	let repos_array = repos.as_array().expect("result is not array");
-	let mut groups = Vec::new();
-
-	for repo in repos_array {
-		if let Some(repo) = repo.as_object() {
-			let id = repo.get("id")
-						.expect("should have 'id' attribute")
-						.as_u64()
-						.expect("id should be an integer");
-
-			groups.push(id);
-		} else {
-			panic!("repo should be an object");
-		}
-	}
-
-	groups
-}
-
-fn gitlab_get_repositories(group_url: &str) -> Vec<String> {
-	let client = reqwest::blocking::Client::new();
-
-	let resp = client.get(group_url)
-		.header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:75.0) Gecko/20100101 Firefox/75.0")
-		.header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
-		.header("Accept-Language", "en-US,en;q=0.5")
-		//.header("Accept-Encoding", "gzip, deflate, br")
-		.send()
-		.unwrap();
-	
-
-	if resp.status() != reqwest::StatusCode::OK {
-		panic!("failed to get response code 200 from: {}, instead got: {:?}", group_url, resp.status());
-	}
-
-	let repos: serde_json::Value = serde_json::from_str(&resp.text().unwrap()).unwrap();
-	let repos_array = repos.as_array().expect("result is not array");
-	let mut urls = Vec::new();
-
-	for repo in repos_array {
-		if let Some(repo) = repo.as_object() {
-			urls.push(String::from(repo.get("http_url_to_repo").expect("should have 'http_url_to_repo' attribute")
-				.as_str().expect("http_url_to_repo should be a string")));
-		} else {
-			panic!("repo should be an object");
-		}
-	}
-
-	urls
-}
-
-fn gitlab_to_list(group_name: &str) -> Vec<String> {
-	let mut url_list = Vec::new();
-
-	let group_api_url = format!("https://gitlab.com/api/v4/groups/{}/subgroups", group_name);
-	let subgroups = gitlab_get_subgroups(&group_api_url);
-	//println!("{:?}", subgroups);
-
-	for group_id in subgroups {
-		let mut urls = gitlab_to_list(&group_id.to_string());
-		url_list.append(&mut urls);
-	}
-
-	let repositories_api_url = format!("https://gitlab.com/api/v4/groups/{}/projects", group_name);
-	let mut repositories = gitlab_get_repositories(&repositories_api_url);
-	//println!("{:?}", repositories);
-	url_list.append(&mut repositories);
-
-	url_list
-}
-
-fn download_and_save_from_gitlab(group_name: &str, output_filename: &str, compare_file: &str, prepand_command: &str) {
-	let urls = gitlab_to_list(group_name);
-	let mut compare_list = Vec::new();
-
-	if !compare_file.is_empty() {
-		let mut file = File::open(compare_file).unwrap();
-		let mut contents = String::new();
-		file.read_to_string(&mut contents).unwrap();
-
-		contents = contents.replace("\r", "");
-		
-		for line in contents.split("\n") {
-			compare_list.push(line.trim().to_string());
-		}
-	}
-
-	write_urls(&urls, output_filename, compare_list, prepand_command);
-}
-
-fn find_git_dir(path: &Path) -> Option<PathBuf> {
-	for d in read_dir(path).unwrap() {
-		let entry = d.unwrap();
-
-		if entry.file_type().unwrap().is_dir() && entry.file_name() == ".git" {
-			return Some(entry.path());
-		}
-	}
-
-	None
-}
-
-fn find_config(path: &Path) -> Option<PathBuf> {
-	for d in read_dir(path).unwrap() {
-		let entry = d.unwrap();
-
-		if entry.file_type().unwrap().is_file() && entry.file_name() == "config" {
-			return Some(entry.path());
-		}
-	}
-
-	None
-}
-
-fn get_url(path: &Path) -> Option<String> {
-	let mut file = File::open(path).unwrap();
-	let mut contents = String::new();
-	file.read_to_string(&mut contents).unwrap();
-	contents = contents.replace("\r", "");
-	
-	for line in contents.split("\n") {
-		let clean = line.replace(" ", "").replace("\t", "").replace("\n", "");
-		let pair: Vec<&str> = clean.split('=').collect();
-		
-		if pair.len() == 2 && pair[0] == "url" {
-			return Some(pair[1].to_owned());
-		}
-	}
-
-	None
-}
-
-fn scan_repos(reposdir: &Path, level: usize, mut urls: &mut Vec<String>) {
-	for d in read_dir(reposdir).unwrap() {
-		let entry = d.unwrap();
-
-		if !entry.file_type().unwrap().is_dir() {
-			continue;
-		}
-
-		let git_dir;
-
-		if let Some(dir) = find_git_dir(entry.path().as_path()) {
-			git_dir = dir;
-		} else {
-			git_dir = entry.path();
-		}
-		
-		if let Some(cfg) = find_config(git_dir.as_path()) {
-			if let Some(url) = get_url(cfg.as_path()) {
-				urls.push(url);
-			}
-		} else if level < 1 {
-			scan_repos(git_dir.as_path(), level + 1, &mut urls);
-		}
-	}
-
-	if level == 0 {
-		write_urls(&urls, String::new().as_str(), Vec::new(), "");
-	}
-}
-
-fn get_crate_url(crate_name: &str) -> String {
-	format!("https://crates.io/api/v1/crates/{}", crate_name)
-}
-
-fn get_crate_repository_url(crate_name: &str) -> Option<String> {
-	let client = reqwest::blocking::Client::new();
-	let crate_url = get_crate_url(crate_name);
-
-	let resp = client.get(crate_url.as_str())
-		.header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:75.0) Gecko/20100101 Firefox/75.0")
-		.header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
-		.header("Accept-Language", "en-US,en;q=0.5")
-		//.header("Accept-Encoding", "gzip, deflate, br")
-		.send()
-		.unwrap();
-	
-
-	if resp.status() != reqwest::StatusCode::OK {
-		panic!("failed to get response code 200 from: {}, instead got: {:?}", crate_url, resp.status());
-	}
-
-	let repos: serde_json::Value = serde_json::from_str(&resp.text().unwrap()).unwrap();
-	let crate_object = repos.as_object().expect("result is not an object").get("crate").unwrap().as_object().unwrap();
-
-	if let Some(repo_url) = crate_object.get("repository").unwrap().as_str() {
-		return Some(repo_url.to_owned())
-	} else {
-		None
-	}
-}
-
-fn collect_crate_urls(crates_file: &str) -> Vec<String> {
-	let mut file = File::open(crates_file).unwrap();
-	let mut contents = String::new();
-	file.read_to_string(&mut contents).unwrap();
-	contents = contents.replace("\r", "");
-	let mut crates = Vec::new();
-
-	for line in contents.split("\n") {
-		let parts: Vec<&str> = line.split(' ').collect();
-		let crate_name = parts[1];
-		crates.push(crate_name);
-	}
-
-	crates.sort_unstable();
-	crates.dedup();
-
-	let mut urls = Vec::new();
-
-	for c in crates {
-		if let Some(repo_url) = get_crate_repository_url(c) {
-			urls.push(repo_url);
-		} else {
-			println!("crate {} has no repository url", c);
-		}
-	}
-
-	urls
-}
-
-fn download_crates(crates_file: &str, output_filename: &str, compare_file: &str, prepand_command: &str) {
-	let repos = collect_crate_urls(crates_file);
-
-	let mut compare_list = Vec::new();
-
-	if !compare_file.is_empty() {
-		let mut file = File::open(compare_file).unwrap();
-		let mut contents = String::new();
-		file.read_to_string(&mut contents).unwrap();
-
-		contents = contents.replace("\r", "");
-		
-		for line in contents.split("\n") {
-			compare_list.push(line.trim().to_string());
-		}
-	}
-
-	write_urls(&repos, output_filename, compare_list, prepand_command);
-}
-
 enum Action {
 	None,
 	DownloadGithub,
@@ -401,7 +63,8 @@ fn main() {
 
 	let mut prepand_command = String::new();
 	let mut output_filename = String::new();
-	let mut url = String::new();
+	let mut project = String::new();
+	let mut project_type = github::ProjectType::None;
 	let mut reposdir = String::new();
 	let mut compare_file = String::new();
 	let mut filter_forks = false;
@@ -417,7 +80,8 @@ fn main() {
 				let org_name = args.get(i + 1).unwrap();
 				output_filename = org_name.clone();
 				output_filename.push_str(".txt");
-				url = get_github_url("orgs", org_name);
+				project = org_name.clone();
+				project_type = github::ProjectType::Organization;
 				cmd = Action::DownloadGithub;
 			}
 			"-o" => {
@@ -430,11 +94,13 @@ fn main() {
 				prepand_command = args.get(i + 1).unwrap().clone();
 			}
 			"--github-org" | "--github-orgs" => {
-				url = get_github_url("orgs", args.get(i + 1).unwrap());
+				project = args.get(i + 1).unwrap().to_owned();
+				project_type = github::ProjectType::Organization;
 				cmd = Action::DownloadGithub;
 			}
 			"--github-user" | "--github-users" => {
-				url = get_github_url("users", args.get(i + 1).unwrap());
+				project = args.get(i + 1).unwrap().to_owned();
+				project_type = github::ProjectType::User;
 				cmd = Action::DownloadGithub;
 			}
 			"--gitlab-group" => {
@@ -467,17 +133,20 @@ fn main() {
 			println!("nothing to be done, TODO: print help");
 		}
 		Action::DownloadGithub => {
-			download_and_save_from_github(&url, &output_filename, false, filter_forks, only_forks, &compare_file, &prepand_command);
+			let urls = github::get_urls(&project, &project_type, filter_forks, only_forks);
+			write_urls(&urls, &output_filename, &compare_file, &prepand_command);
 		}
 		Action::DownloadGitlab => {
-			download_and_save_from_gitlab(&gitlab_group, &output_filename, &compare_file, &prepand_command);
+			let urls = gitlab::get_urls(&gitlab_group);
+			write_urls(&urls, &output_filename, &compare_file, &prepand_command);
 		},
 		Action::DownloadCrates => {
-			download_crates(&crates_file, &output_filename, &compare_file, &prepand_command);
+			let urls = crates::get_urls(&crates_file);
+			write_urls(&urls, &output_filename, &compare_file, &prepand_command);
 		}
 		Action::ScanReposDir => {
-			let mut urls = Vec::new();
-			scan_repos(Path::new(reposdir.as_str()), 0, &mut urls);
+			let urls = scanner::scan_repos(Path::new(reposdir.as_str()), 0);
+			write_urls(&urls, &output_filename, &compare_file, &prepand_command);
 		}
 	}
 }
