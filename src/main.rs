@@ -308,28 +308,108 @@ fn scan_repos(reposdir: &Path, level: usize, mut urls: &mut Vec<String>) {
 	}
 }
 
+fn get_crate_url(crate_name: &str) -> String {
+	format!("https://crates.io/api/v1/crates/{}", crate_name)
+}
+
+fn get_crate_repository_url(crate_name: &str) -> Option<String> {
+	let client = reqwest::blocking::Client::new();
+	let crate_url = get_crate_url(crate_name);
+
+	let resp = client.get(crate_url.as_str())
+		.header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:75.0) Gecko/20100101 Firefox/75.0")
+		.header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
+		.header("Accept-Language", "en-US,en;q=0.5")
+		//.header("Accept-Encoding", "gzip, deflate, br")
+		.send()
+		.unwrap();
+	
+
+	if resp.status() != reqwest::StatusCode::OK {
+		panic!("failed to get response code 200 from: {}, instead got: {:?}", crate_url, resp.status());
+	}
+
+	let repos: serde_json::Value = serde_json::from_str(&resp.text().unwrap()).unwrap();
+	let crate_object = repos.as_object().expect("result is not an object").get("crate").unwrap().as_object().unwrap();
+
+	if let Some(repo_url) = crate_object.get("repository").unwrap().as_str() {
+		return Some(repo_url.to_owned())
+	} else {
+		None
+	}
+}
+
+fn collect_crate_urls(crates_file: &str) -> Vec<String> {
+	let mut file = File::open(crates_file).unwrap();
+	let mut contents = String::new();
+	file.read_to_string(&mut contents).unwrap();
+	contents = contents.replace("\r", "");
+	let mut crates = Vec::new();
+
+	for line in contents.split("\n") {
+		let parts: Vec<&str> = line.split(' ').collect();
+		let crate_name = parts[1];
+		crates.push(crate_name);
+	}
+
+	crates.sort_unstable();
+	crates.dedup();
+
+	let mut urls = Vec::new();
+
+	for c in crates {
+		if let Some(repo_url) = get_crate_repository_url(c) {
+			urls.push(repo_url);
+		} else {
+			println!("crate {} has no repository url", c);
+		}
+	}
+
+	urls
+}
+
+fn download_crates(crates_file: &str, output_filename: &str, compare_file: &str, prepand_command: &str) {
+	let repos = collect_crate_urls(crates_file);
+
+	let mut compare_list = Vec::new();
+
+	if !compare_file.is_empty() {
+		let mut file = File::open(compare_file).unwrap();
+		let mut contents = String::new();
+		file.read_to_string(&mut contents).unwrap();
+
+		contents = contents.replace("\r", "");
+		
+		for line in contents.split("\n") {
+			compare_list.push(line.trim().to_string());
+		}
+	}
+
+	write_urls(&repos, output_filename, compare_list, prepand_command);
+}
+
 enum Action {
 	None,
 	DownloadGithub,
 	DownloadGitlab,
+	DownloadCrates,
 	ScanReposDir
 }
 
 fn main() {
 	let args: Vec<String> = env::args().collect();
-	//println!("{:?}", args);
 
 	let mut prepand_command = String::new();
 	let mut output_filename = String::new();
 	let mut url = String::new();
-	// let mut input_filename = String::new();
 	let mut reposdir = String::new();
 	let mut compare_file = String::new();
 	let mut filter_forks = false;
 	let mut only_forks = false;
 	let mut cmd = Action::None;
 	let mut gitlab_group = String::new();
-	
+	let mut crates_file = String::new();
+
 	for (i, arg) in args.iter().enumerate() {
 		match arg.as_str() {
 			"-d" | "--default" => {
@@ -340,9 +420,6 @@ fn main() {
 				url = get_github_url("orgs", org_name);
 				cmd = Action::DownloadGithub;
 			}
-			// "-i" => {
-			// 	input_filename = args.get(i + 1).unwrap().clone();
-			// }
 			"-o" => {
 				output_filename = args.get(i + 1).unwrap().clone();
 			}
@@ -363,6 +440,10 @@ fn main() {
 			"--gitlab-group" => {
 				gitlab_group = args.get(i + 1).unwrap().clone();
 				cmd = Action::DownloadGitlab;
+			},
+			"--crates" => {
+				crates_file = args.get(i + 1).unwrap().clone();
+				cmd = Action::DownloadCrates;
 			}
 			"--scan-repos" => {
 				reposdir = args.get(i + 1).unwrap().clone();
@@ -386,10 +467,13 @@ fn main() {
 			println!("nothing to be done, TODO: print help");
 		}
 		Action::DownloadGithub => {
-			download_and_save_from_github(url.as_str(), output_filename.as_str(), false, filter_forks, only_forks, &compare_file, prepand_command.as_str());
+			download_and_save_from_github(&url, &output_filename, false, filter_forks, only_forks, &compare_file, &prepand_command);
 		}
 		Action::DownloadGitlab => {
-			download_and_save_from_gitlab(&gitlab_group, output_filename.as_str(), &compare_file, prepand_command.as_str());
+			download_and_save_from_gitlab(&gitlab_group, &output_filename, &compare_file, &prepand_command);
+		},
+		Action::DownloadCrates => {
+			download_crates(&crates_file, &output_filename, &compare_file, &prepand_command);
 		}
 		Action::ScanReposDir => {
 			let mut urls = Vec::new();
