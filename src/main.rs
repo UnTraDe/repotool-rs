@@ -20,7 +20,7 @@ fn write_urls(urls: &Vec<String>, mut output_filename: &str, compare_file: &str,
 		contents = contents.replace("\r", "");
 		
 		for line in contents.split("\n") {
-			compare_list.push(line.trim().to_string());
+			compare_list.push(line.trim().to_string().to_lowercase());
 		}
 	}
 
@@ -32,6 +32,7 @@ fn write_urls(urls: &Vec<String>, mut output_filename: &str, compare_file: &str,
 		.filter(|u| {
 			let p = Path::new(u);
 			let mut alt = String::new();
+			let u = u.to_string().to_lowercase();
 
 			if let Some(ext) = p.extension() {
 				if ext == "git" {
@@ -46,7 +47,7 @@ fn write_urls(urls: &Vec<String>, mut output_filename: &str, compare_file: &str,
 
 			println!("u: {}, alt: {}", u, alt);
 
-			!compare_list.contains(u) && !compare_list.contains(&alt)
+			!compare_list.contains(&u) && !compare_list.contains(&alt)
 		})
 		.collect::<Vec<&String>>();
 
