@@ -29,7 +29,25 @@ fn write_urls(urls: &Vec<String>, mut output_filename: &str, compare_file: &str,
 	}
 	
 	let filtered = urls.iter()
-		.filter(|u| !compare_list.contains(u))
+		.filter(|u| {
+			let p = Path::new(u);
+			let mut alt = String::new();
+
+			if let Some(ext) = p.extension() {
+				if ext == "git" {
+					alt = u[0..u.len()-4].to_owned();
+				}
+			}
+
+			if alt.is_empty() {
+				alt = u.to_string();
+				alt.push_str(".git");
+			}
+
+			println!("u: {}, alt: {}", u, alt);
+
+			!compare_list.contains(u) && !compare_list.contains(&alt)
+		})
 		.collect::<Vec<&String>>();
 
 	let mut f = OpenOptions::new()
