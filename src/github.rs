@@ -19,7 +19,8 @@ impl ProjectType {
 pub fn get_urls(project: &str, project_type: &ProjectType, filter_forks: bool, only_forks: bool, get_submodules: bool) -> Vec<String> {
 	assert!(!(filter_forks && only_forks));
 
-	let (resp, next_url) = common::request_get(&format!("https://api.github.com/{}/{}/repos?per_page=200", project_type.as_str(), project)).unwrap();
+	let url = format!("https://api.github.com/{}/{}/repos?per_page=200", project_type.as_str(), project);
+	let (resp, next_url) = common::request_get(&url).expect(&format!("failed: {} ", url));
 	let repos: serde_json::Value = serde_json::from_str(&resp).unwrap();
 	let repos_array = repos.as_array().expect("result is not array");
 	let mut urls = Vec::new();

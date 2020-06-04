@@ -3,7 +3,8 @@ use std::io::prelude::*;
 use crate::common;
 
 fn get_crate_repository_url(crate_name: &str) -> Option<String> {
-	let (resp, _) = common::request_get(&format!("https://crates.io/api/v1/crates/{}", crate_name)).unwrap();
+	let url = format!("https://crates.io/api/v1/crates/{}", crate_name);
+	let (resp, _) = common::request_get(&url).expect(&format!("failed: {} ", url));
 	let repos: serde_json::Value = serde_json::from_str(&resp).unwrap();
 	let crate_object = repos.as_object().expect("result is not an object").get("crate").unwrap().as_object().unwrap();
 

@@ -45,8 +45,6 @@ fn write_urls(urls: &Vec<String>, mut output_filename: &str, compare_file: &str,
 				alt.push_str(".git");
 			}
 
-			println!("u: {}, alt: {}", u, alt);
-
 			!compare_list.contains(&u) && !compare_list.contains(&alt)
 		})
 		.collect::<Vec<&String>>();
