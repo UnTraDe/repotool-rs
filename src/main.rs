@@ -72,7 +72,8 @@ enum Action {
 	DownloadGithub,
 	DownloadGitlab,
 	DownloadCrates,
-	ScanReposDir
+	ScanReposDir,
+	GitSubmodulesToUrls
 }
 
 fn main() {
@@ -80,6 +81,7 @@ fn main() {
 
 	let mut prepand_command = String::new();
 	let mut output_filename = String::new();
+	let mut input_filename = String::new();
 	let mut project = String::new();
 	let mut project_type = github::ProjectType::None;
 	let mut reposdir = String::new();
@@ -105,9 +107,10 @@ fn main() {
 			"-o" => {
 				output_filename = args.get(i + 1).unwrap().clone();
 			}
-			// "-m2url" => {
-			// 	unimplemented!();
-			// }
+			"-m" => {
+				input_filename =  args.get(i + 1).unwrap().clone();
+				cmd = Action::GitSubmodulesToUrls;
+			}
 			"-p" | "--prepend" => {
 				prepand_command = args.get(i + 1).unwrap().clone();
 			}
@@ -167,6 +170,14 @@ fn main() {
 		}
 		Action::ScanReposDir => {
 			let urls = scanner::scan_repos(Path::new(reposdir.as_str()), 0);
+			write_urls(&urls, &output_filename, &compare_file, &prepand_command);
+		}
+		Action::GitSubmodulesToUrls => {
+			assert!(!input_filename.is_empty());
+			let mut file = File::open(input_filename).unwrap();
+			let mut contents = String::new();
+			file.read_to_string(&mut contents).unwrap();
+			let urls = common::get_urls_from_git(contents);
 			write_urls(&urls, &output_filename, &compare_file, &prepand_command);
 		}
 	}
