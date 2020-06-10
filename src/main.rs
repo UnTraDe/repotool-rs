@@ -8,6 +8,7 @@ mod scanner;
 mod github;
 mod gitlab;
 mod crates;
+mod gitweb;
 
 fn write_urls(urls: &Vec<String>, mut output_filename: &str, compare_file: &str, prepand_command: &str) {
 	let mut compare_list = Vec::new();
@@ -72,6 +73,7 @@ enum Action {
 	DownloadGithub,
 	DownloadGitlab,
 	DownloadCrates,
+	DownloadGitweb,
 	ScanReposDir,
 	GitSubmodulesToUrls
 }
@@ -91,6 +93,7 @@ fn main() {
 	let mut cmd = Action::None;
 	let mut gitlab_group = String::new();
 	let mut crates_file = String::new();
+	let mut gitweb_url = String::new();
 	let mut get_submodules = false;
 
 	for (i, arg) in args.iter().enumerate() {
@@ -128,6 +131,10 @@ fn main() {
 				gitlab_group = args.get(i + 1).unwrap().clone();
 				cmd = Action::DownloadGitlab;
 			},
+			"--gitweb" => {
+				gitweb_url = args.get(i + 1).unwrap().clone();
+				cmd = Action::DownloadGitweb;
+			},
 			"--crates" => {
 				crates_file = args.get(i + 1).unwrap().clone();
 				cmd = Action::DownloadCrates;
@@ -164,6 +171,10 @@ fn main() {
 			let urls = gitlab::get_urls(&gitlab_group);
 			write_urls(&urls, &output_filename, &compare_file, &prepand_command);
 		},
+		Action::DownloadGitweb => {
+			let urls = gitweb::get_urls(&gitweb_url);
+			write_urls(&urls, &output_filename, &compare_file, &prepand_command);
+		}
 		Action::DownloadCrates => {
 			let urls = crates::get_urls(&crates_file);
 			write_urls(&urls, &output_filename, &compare_file, &prepand_command);
