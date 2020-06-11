@@ -11,7 +11,7 @@ impl ProjectType {
 		match self {
 			ProjectType::None => "",
 			ProjectType::Organization => "orgs",
-			ProjectType::User => "orgs"
+			ProjectType::User => "users"
 		}
 	}
 }
